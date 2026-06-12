@@ -706,6 +706,20 @@ func _is_blocked_property(prop: String) -> bool:
 
 # ─── Input simulation ──────────────────────────────────────────────────────
 
+# Deliver a synthetic event through the full input pipeline (GUI picking +
+# _input/_unhandled_input callbacks). Input.parse_input_event() only updates the
+# Input singleton's polling state and does NOT invoke node input callbacks, so
+# Control buttons and _input() handlers never fire from it. Viewport.push_input()
+# is the canonical way to drive both. Coords are already in viewport-local space
+# (the caller sends logical viewport coordinates), hence in_local_coords = true.
+func _emit_input(event: InputEvent) -> void:
+	var vp := get_viewport()
+	if vp != null:
+		vp.push_input(event, true)
+	else:
+		Input.parse_input_event(event)
+
+
 func _cmd_send_key(params: Dictionary) -> Variant:
 	var key: String = str(params.get("key", ""))
 	var pressed: bool = params.get("pressed", true)
@@ -715,7 +729,7 @@ func _cmd_send_key(params: Dictionary) -> Variant:
 	var event := InputEventKey.new()
 	event.keycode = keycode
 	event.pressed = pressed
-	Input.parse_input_event(event)
+	_emit_input(event)
 	return {"success": true, "key": key}
 
 
@@ -748,7 +762,7 @@ func _cmd_send_mouse_click(params: Dictionary) -> Variant:
 	event.button_index = button
 	event.pressed = pressed
 	event.global_position = Vector2(x, y)
-	Input.parse_input_event(event)
+	_emit_input(event)
 	return {"success": true, "x": x, "y": y, "button": button}
 
 
@@ -758,7 +772,7 @@ func _cmd_send_mouse_move(params: Dictionary) -> Variant:
 	var event := InputEventMouseMotion.new()
 	event.position = Vector2(x, y)
 	event.global_position = Vector2(x, y)
-	Input.parse_input_event(event)
+	_emit_input(event)
 	return {"success": true, "x": x, "y": y}
 
 
@@ -770,9 +784,9 @@ func _cmd_send_text(params: Dictionary) -> Variant:
 		var event := InputEventKey.new()
 		event.unicode = ch.unicode_at(0)
 		event.pressed = true
-		Input.parse_input_event(event)
+		_emit_input(event)
 		event.pressed = false
-		Input.parse_input_event(event)
+		_emit_input(event)
 	return {"success": true, "characters": text.length()}
 
 
@@ -818,7 +832,15 @@ func _cmd_take_screenshot(params: Dictionary) -> Variant:
 	var err := img.save_png(clean_path)
 	if err != OK:
 		return {"error": {"code": -2, "message": "Failed to save screenshot: error %d" % err}}
-	return {"success": true, "path": clean_path, "size": {"x": img.get_width(), "y": img.get_height()}}
+	# Renvoie AUSSI le chemin absolu sur disque : user:// résout vers app_userdata/<config/name
+	# sanitisé>, dont la sanitisation a varié selon les versions de Godot (ex. apostrophe gardée en
+	# 4.6) — l'appelant doit lire abs_path, pas reconstruire le chemin à la main.
+	return {
+		"success": true,
+		"path": clean_path,
+		"abs_path": ProjectSettings.globalize_path(clean_path),
+		"size": {"x": img.get_width(), "y": img.get_height()},
+	}
 
 
 func _cmd_get_performance() -> Dictionary:

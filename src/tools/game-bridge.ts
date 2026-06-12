@@ -76,7 +76,11 @@ function readBridgeSecret(): string | null {
         // C-ARC-01: Use os.userInfo().username (no env spoofing), strict regex (no backslash)
         const username = userInfo().username;
         if (username && /^[A-Za-z0-9_-]+$/.test(username)) {
-          execFileSync('icacls', [secretPath, '/inheritance:r', '/grant:r', `${username}:R`], { stdio: 'ignore' });
+          // Grant Modify (M), not Read-only (R): removing inheritance + granting only the
+          // owner already keeps the secret private. With :R the Godot bridge can no longer
+          // overwrite its own secret on the next launch (FileAccess WRITE fails, and even
+          // `del` is denied), aborting bridge startup. :M keeps it private AND rewritable.
+          execFileSync('icacls', [secretPath, '/inheritance:r', '/grant:r', `${username}:M`], { stdio: 'ignore' });
         }
       } catch (err) { getLogger().debug('bridge', `restrict Windows file permissions: ${err}`); }
     } else {
